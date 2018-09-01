@@ -1,0 +1,54 @@
+resources:
+# Automation scripts repo
+  - name: aws_vpc_repo
+    type: gitRepo
+    integration: "drship_github"      # replace with Github integration name if different
+    versionTemplate:
+      sourceName: "devops-recipes/prov_aws_vpc_ansible"  # replace with  your org name/repo name
+      branch: master
+
+# AWS Keys integration
+  - name: aws_creds
+    type: integration
+    integration: "dr_aws"         # replace with AWS Keys integration name if different
+
+
+# Output of VPC provisioning
+  - name: aws_vpc_info
+    type: params
+    versionTemplate:
+      params:
+        SEED: "initial_version"       # this will be replaced programmatically at runtime
+
+jobs:
+  # Provision AWS VPC with Ansible
+  - name: prov_aws_vpc_ans
+    type: runSh
+    steps:
+      - IN: aws_vpc_repo
+      - IN: aws_creds
+        switch: off     # do not automatically trigger job when credentials change
+      - TASK:
+          name: prov_vpc
+          runtime:
+            options:
+              env:
+                # Values that should replace wildcards in ansible playbook
+                - STATE_RES_NAME: "aws_vpc_info"
+                - vpc_region: "us-east-1"
+                - vpc_name: "demo_vpc"
+                - vpc_cidr_block: "10.10.0.0/16"
+                - vpc_access_from_ip_range: "0.0.0.0/0"
+                - vpc_public_subnet_1_cidr: "10.10.10.0/24"
+          script:
+            - pushd $(shipctl get_resource_state "aws_vpc_repo")/ansible
+            # Export access and secret keys from the aws_creds integration
+            - export AWS_ACCESS_KEY_ID=$(shipctl get_integration_resource_field aws_creds "accessKey")
+            - export AWS_SECRET_ACCESS_KEY=$(shipctl get_integration_resource_field aws_creds "secretKey")
+            # Replace wildcards
+            - shipctl replace variables.yml
+            # Run playbook
+            - ansible-playbook -v vpc_prov_playbook.yml
+      #
+      - OUT: aws_vpc_info
+        overwrite: true
